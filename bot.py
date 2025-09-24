@@ -198,9 +198,6 @@ def get_fragment_balance(token):
 
 def send_stars(token, username, quantity):
     try:
-        if not username.startswith('@'):
-            username = f"@{username}"
-
         data = {
             "username": username,
             "quantity": quantity,
@@ -211,7 +208,7 @@ def send_stars(token, username, quantity):
             "Content-Type": "application/json"
         }
 
-        logger.info(f"🔄 Отправка {quantity} ⭐ пользователю {username}...")
+        logger.info(f"🔄 Отправка {quantity} ⭐ пользователю @{username}...")
         res = requests.post(f"{FRAGMENT_API_URL}/order/stars/", json=data, headers=headers)
 
         if res.status_code == 200:
@@ -374,6 +371,7 @@ def handle_check_payment(call: CallbackQuery):
 
 
 # Функции для создания клавиатур
+# Функции для создания клавиатур
 def main_menu_keyboard():
     keyboard = InlineKeyboardMarkup()
     keyboard.row(
@@ -417,6 +415,9 @@ def deposit_keyboard(user_data):
     amounts = [50, 100, 500, 1000]
     for amount in amounts:
         keyboard.row(InlineKeyboardButton(f"{amount} руб", callback_data=f'deposit_{amount}'))
+
+    # Добавляем новую кнопку для ввода кастомной суммы
+    keyboard.row(InlineKeyboardButton("✍️ Другая сумма", callback_data='deposit_custom'))
 
     keyboard.row(InlineKeyboardButton("↩️ Назад", callback_data='main_menu'))
     return keyboard
@@ -483,10 +484,86 @@ def handle_callback(call: CallbackQuery):
         stars = int(call.data.split('_')[1])
         process_star_purchase(call, user_data, stars)
     elif call.data.startswith('deposit_'):
-        amount = int(call.data.split('_')[1])
-        process_deposit(call, user_data, amount)
+        # Проверяем, что это не кастомная сумма
+        if call.data == 'deposit_custom':
+            user_states[user_id] = {'state': 'waiting_for_deposit_amount', 'message_id': call.message.message_id}
+            bot.edit_message_caption(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                caption="💰 На какую сумму хотите пополнить?",
+                reply_markup=back_to_main_keyboard()
+            )
+            msg = call.message
+            bot.register_next_step_handler(msg, process_custom_deposit_amount)
+        else:
+            # Обработка стандартных сумм
+            amount = int(call.data.split('_')[1])
+            process_deposit(call, user_data, amount)
     else:
         bot.answer_callback_query(call.id, "Неизвестная команда")
+
+def process_custom_deposit_amount(message: Message):
+    user_id = message.from_user.id
+    amount_input = message.text.strip()
+    state_data = user_states.get(user_id, {})
+    target_message_id = state_data.get('message_id')
+
+    try:
+        # Удаляем сообщение пользователя, чтобы не засорять чат
+        if message.message_id != target_message_id:
+            bot.delete_message(message.chat.id, message.message_id)
+    except Exception as e:
+        logger.error(f"Не удалось удалить сообщение: {e}")
+
+    # Проверка, что сумма является числом и больше нуля
+    try:
+        amount = float(amount_input)
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        if target_message_id:
+            bot.edit_message_caption(
+                chat_id=message.chat.id,
+                message_id=target_message_id,
+                caption="❌ Некорректная сумма. Пожалуйста, введите число больше 0:",
+                reply_markup=back_to_main_keyboard()
+            )
+            bot.register_next_step_handler(message, process_custom_deposit_amount)
+            return
+        else:
+            bot.send_message(message.chat.id, "❌ Некорректная сумма. Пожалуйста, начните заново.")
+            return
+
+    # Создаем и обрабатываем платеж
+    payment_url = create_yookassa_payment(amount, user_id)
+    if payment_url and target_message_id:
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(InlineKeyboardButton("✅ Я оплатил", callback_data='check_payment'))
+
+        bot.edit_message_caption(
+            chat_id=message.chat.id,
+            message_id=target_message_id,
+            caption=f"💳 Для пополнения на {amount} руб:\n\n"
+                    f"1. Перейдите по ссылке: {payment_url}\n"
+                    f"2. Оплатите счет\n"
+                    f"3. Нажмите кнопку '✅ Я оплатил'\n\n"
+                    "⚠️ Платеж обрабатывается автоматически в течение нескольких минут.",
+            reply_markup=keyboard
+        )
+    else:
+        if target_message_id:
+            bot.edit_message_caption(
+                chat_id=message.chat.id,
+                message_id=target_message_id,
+                caption="❌ Ошибка создания платежа! Попробуйте позже.",
+                reply_markup=back_to_main_keyboard()
+            )
+        else:
+            bot.send_message(message.chat.id, "❌ Ошибка создания платежа!")
+
+    # Удаляем состояние после завершения
+    if user_id in user_states:
+        del user_states[user_id]
 
 def process_friend_username(message: Message):
     user_id = message.from_user.id
