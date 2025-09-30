@@ -1,6 +1,7 @@
 # Бот для продажи звезд через телеграмм
 Бот телеграмм для продажи звезд
-![ezgif-5af39d7cfedef9](https://github.com/user-attachments/assets/212eebe7-ef0e-481c-9d0a-9d1b2adf29ea)
+
+![ezgif-582485d2ef758c](https://github.com/user-attachments/assets/90594fd3-fe3f-4def-a9e7-ae0b71b62178)
 
 ## Настройка
 Итак это ваш файл `.env`, соаздйте его рядом с проектом и заполните
