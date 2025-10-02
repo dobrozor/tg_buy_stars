@@ -248,3 +248,21 @@ def set_setting(key, value):
     )
     conn.commit()
     conn.close()
+
+# db.py - добавить в конец файла
+
+def get_ton_rate():
+    """Получает текущий курс TON из БД."""
+    return get_setting('ton_rub_rate')
+
+def set_ton_rate(rate):
+    """Сохраняет курс TON в БД."""
+    set_setting('ton_rub_rate', str(rate))
+
+def get_ton_rate_updated_at():
+    """Получает время последнего обновления курса."""
+    return get_setting('ton_rate_updated_at')
+
+def set_ton_rate_updated_at(timestamp):
+    """Сохраняет время обновления курса."""
+    set_setting('ton_rate_updated_at', timestamp)

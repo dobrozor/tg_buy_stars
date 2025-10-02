@@ -1,6 +1,10 @@
 import json
 import os
+import telebot
+import config
 import requests
+
+from bot import bot
 from config import (
     FRAGMENT_API_URL, FRAGMENT_API_KEY, FRAGMENT_PHONE,
     FRAGMENT_MNEMONICS, TOKEN_FILE, logger
@@ -68,9 +72,11 @@ def send_stars(token, username, quantity):
         res = requests.post(f"{FRAGMENT_API_URL}/order/stars/", json=data, headers=headers)
 
         if res.status_code == 200:
+            bot.send_message(config.ADMIN_ID, f"✅ Отправлены {quantity} ⭐ пользователю @{username}...")
             logger.info("✅ Звезды успешно отправлены!")
             return True, "Успешно"
         else:
+            bot.send_message(config.ADMIN_ID, f"❌ Ошибка отправки {quantity} ⭐ пользователю @{username}. \n\nТекст ошибки: {res.text}")
             error_msg = f"❌ Ошибка отправки: {res.text}"
             logger.error(error_msg)
             return False, res.text

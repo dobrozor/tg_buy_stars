@@ -15,13 +15,15 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 
 
 try:
-    from config import STAR_PRICE, MAIN_MENU_IMAGE, WELCOME_MES, logger, REFERRAL_REWARD # ДОБАВЛЕН REFERRAL_REWARD
+    from config import STAR_PRICE, MAIN_MENU_IMAGE, WELCOME_MES, logger, REFERRAL_REWARD, \
+    ADMIN_ID  # ДОБАВЛЕН REFERRAL_REWARD
     from db import (
         init_db, get_user, create_user, update_balance, add_transaction,
         get_pending_payment, update_payment_status,
         set_session_data, get_session_data, delete_session_data,
-        get_setting, set_setting, get_referral_count # ДОБАВЛЕН get_referral_count
-    )
+        get_setting, set_setting, get_referral_count, get_ton_rate_updated_at,
+        set_ton_rate, set_ton_rate_updated_at, get_ton_rate  # ДОБАВЛЕН get_referral_count
+)
     from fragment_api import load_fragment_token, authenticate_fragment, send_stars
     from yookassa import create_yookassa_payment, check_payment_status
     from keyboards import (
@@ -142,7 +144,6 @@ def buy_stars_selection_menu(call: CallbackQuery):
     )
 
 
-# --- ОБНОВЛЕННАЯ ФУНКЦИЯ КЛАВИАТУРЫ ДЛЯ ДЕПОЗИТА ---
 def deposit_keyboard(user_data):
     keyboard = InlineKeyboardMarkup()
     amounts = [50, 100, 500, 1000]
@@ -312,6 +313,7 @@ def process_friend_username(message: Message):
 
     user_data = get_user(user_id)
 
+    # ИСПРАВЛЕНИЕ: Экранируем username для корректного отображения в Markdown
     escaped_username = username_input.replace('_', r'\_').replace('*', r'\*').replace('`', r'\`')
 
     bot.edit_message_caption(
@@ -396,6 +398,7 @@ def handle_star_purchase(call: CallbackQuery):
         # Очищаем состояние после завершения
         delete_session_data(user_id)
 
+
 @bot.callback_query_handler(func=lambda call: call.data == 'deposit_ton')
 def handle_ton_deposit(call: CallbackQuery):
     user_id = call.from_user.id
@@ -404,9 +407,17 @@ def handle_ton_deposit(call: CallbackQuery):
         bot.answer_callback_query(call.id, "❌ Пополнение TON временно недоступно (адрес не указан).", show_alert=True)
         return
 
-    # Получаем курс для отображения
+    # Получаем курс из БД (кэшированный)
     ton_rub_rate = get_ton_rub_rate()
     rate_text = f"~{ton_rub_rate:.2f} руб" if ton_rub_rate else "курс недоступен"
+
+    # Добавляем информацию о времени обновления курса
+    last_updated = get_ton_rate_updated_at()
+    if last_updated:
+        last_updated_dt = datetime.fromisoformat(last_updated)
+        update_info = f" (обновлен {last_updated_dt.strftime('%H:%M')})"
+    else:
+        update_info = ""
 
     # URL для быстрой оплаты
     payment_url = f'ton://transfer/{TON_DEPOSIT_ADDRESS}?text={user_id}'
@@ -417,7 +428,7 @@ def handle_ton_deposit(call: CallbackQuery):
         f"   `{TON_DEPOSIT_ADDRESS}`\n\n"
         f"2. **Обязательно** укажите в комментарии свой ID:\n"
         f"   `{user_id}`\n\n"
-        f"💰 Текущий курс: 1 TON ≈ {rate_text}\n"
+        f"💰 Текущий курс: 1 TON ≈ {rate_text}{update_info}\n"
         f"⚠️ Средства будут зачислены на ваш баланс в **РУБЛЯХ** после 3 подтверждений сети."
     )
 
@@ -439,7 +450,48 @@ def handle_ton_deposit(call: CallbackQuery):
     func=lambda call: call.data.startswith('deposit_') and call.data != 'deposit_custom' and call.data != 'deposit_ton')
 def handle_predefined_deposit(call: CallbackQuery):
     amount = int(call.data.split('_')[1])
-    process_deposit(call, amount)
+    process_deposit(call, amount, 'yookassa')
+
+
+def send_admin_deposit_notification(user, amount_rub, deposit_type, status, ton_amount=None):
+    """Отправляет уведомление администратору о пополнении баланса."""
+    try:
+        admin_id = ADMIN_ID
+        if not admin_id:
+            logger.warning("ADMIN_ID не установлен. Уведомления администратора не будут отправляться.")
+            return
+
+        # Формируем текст уведомления в зависимости от типа пополнения
+        if deposit_type == 'ton':
+            type_text = "TON"
+            amount_info = f"{ton_amount:.4f} TON ({amount_rub:.2f} руб)"
+        else:
+            type_text = "ЮKassa"
+            amount_info = f"{amount_rub:.2f} руб"
+
+        status_text = "создан" if status == 'created' else "завершен"
+
+        message = (
+            f"💰 *Пополнение баланса {status_text}*\n\n"
+            f"👤 *Пользователь:*\n"
+            f"   ID: `{user.id}`\n"
+            f"   Username: @{user.username or 'не указан'}\n"
+            f"   Имя: {getattr(user, 'first_name', 'не указано')}\n\n"
+            f"💳 *Детали пополнения:*\n"
+            f"   Способ: {type_text}\n"
+            f"   Сумма: {amount_info}\n"
+            f"   Статус: {status_text}"
+        )
+
+        bot.send_message(
+            admin_id,
+            message,
+            parse_mode='Markdown'
+        )
+        logger.info(f"Уведомление отправлено администратору {admin_id} о пополнении пользователя {user.id}")
+
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления администратору: {e}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'deposit_custom')
@@ -510,18 +562,19 @@ def process_custom_deposit_amount(message: Message):
     })()
 
     # Создаем и обрабатываем платеж
-    process_deposit(call_mock, amount)
+    process_deposit(call_mock, amount, 'yookassa_custom')
 
     # Удаляем состояние после завершения
     delete_session_data(user_id)
 
 
-def process_deposit(call, amount: float):
+def process_deposit(call, amount: float, deposit_type='yookassa'):
     # 'call' может быть как CallbackQuery, так и MockCall
     bot_username = bot.get_me().username
     payment_url = create_yookassa_payment(amount, call.from_user.id, bot_username)
 
     if payment_url:
+
         keyboard = InlineKeyboardMarkup()
         keyboard.row(InlineKeyboardButton("✅ Я оплатил", callback_data='check_payment'))
 
@@ -537,7 +590,6 @@ def process_deposit(call, amount: float):
             parse_mode='Markdown'
         )
     else:
-        # bot.answer_callback_query работает как с CallbackQuery, так и с MockCall (если атрибут 'id' корректно имитирован)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка создания платежа! Попробуйте позже.", show_alert=True)
         except Exception:
@@ -545,6 +597,7 @@ def process_deposit(call, amount: float):
 
         # Возврат в меню депозита
         deposit_menu(call)
+
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'check_payment')
@@ -574,6 +627,9 @@ def handle_check_payment(call: CallbackQuery):
 
         user_data = get_user(user_id)
 
+        # Отправляем уведомление администратору об успешном пополнении
+        send_admin_deposit_notification(call.from_user, amount, 'yookassa', 'completed')
+
         bot.edit_message_caption(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
@@ -601,12 +657,46 @@ def handle_check_payment(call: CallbackQuery):
 
 
 # --- ФУНКЦИИ ФОНОВОГО МОНИТОРИНГА TON (ОБНОВЛЕННЫЕ) ---
+# bot.py - добавить эти функции
 
 def get_ton_rub_rate():
-    """Получает текущий курс TON к рублю."""
+    """Получает текущий курс TON к рублю с кэшированием в БД."""
     try:
-        # Небольшая задержка, чтобы не спамить API
-        time.sleep(0.5)
+        # Пытаемся получить курс из БД
+        cached_rate = get_ton_rate()
+        last_updated = get_ton_rate_updated_at()
+
+        # Если курс в БД есть и он обновлялся менее 10 минут назад - используем его
+        if cached_rate and last_updated:
+            last_updated_dt = datetime.fromisoformat(last_updated)
+            if (datetime.now() - last_updated_dt).total_seconds() < 600:  # 10 минут
+                return float(cached_rate)
+
+        # Иначе получаем свежий курс из API
+        fresh_rate = fetch_fresh_ton_rate()
+        if fresh_rate:
+            # Сохраняем в БД
+            set_ton_rate(fresh_rate)
+            set_ton_rate_updated_at(datetime.now().isoformat())
+            logger.info(f"✅ Курс TON обновлен: {fresh_rate:.2f} RUB")
+            return fresh_rate
+        elif cached_rate:
+            # Если не удалось получить свежий курс, используем кэшированный (даже если старый)
+            logger.warning("⚠️ Используется устаревший курс TON из кэша")
+            return float(cached_rate)
+        else:
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка получения курса TON: {e}")
+        # Пытаемся вернуть кэшированное значение в случае ошибки
+        cached_rate = get_ton_rate()
+        return float(cached_rate) if cached_rate else None
+
+
+def fetch_fresh_ton_rate():
+    """Получает свежий курс TON от API."""
+    try:
         response = requests.get(TON_RATE_API, timeout=5)
         response.raise_for_status()
         data = response.json()
@@ -615,12 +705,29 @@ def get_ton_rub_rate():
             return float(rate)
         return None
     except Exception as e:
-        logger.error(f"Ошибка получения курса TON/RUB: {e}")
+        logger.error(f"Ошибка получения свежего курса TON/RUB: {e}")
         return None
 
 
+async def update_ton_rate_periodically():
+    """Периодическое обновление курса TON каждые 10 минут."""
+    while True:
+        try:
+            fresh_rate = fetch_fresh_ton_rate()
+            if fresh_rate:
+                set_ton_rate(fresh_rate)
+                set_ton_rate_updated_at(datetime.now().isoformat())
+                logger.info(f"🔄 Курс TON обновлен в фоне: {fresh_rate:.2f} RUB")
+                bot.send_message(ADMIN_ID, f"🔄 Курс TON обновлен: {fresh_rate:.2f} RUB")
+            else:
+                logger.warning("❌ Не удалось обновить курс TON в фоновом режиме")
+        except Exception as e:
+            logger.error(f"Ошибка фонового обновления курса TON: {e}")
+
+        await asyncio.sleep(600)  # 10 минут
+
+
 async def check_deposits():
-    """Мониторинг TON транзакций и пополнение баланса."""
     if not TON_DEPOSIT_ADDRESS or not TON_API_KEY:
         logger.error("TON_DEPOSIT_ADDRESS или TON_API_KEY не заданы. Мониторинг не запущен.")
         return
@@ -636,7 +743,7 @@ async def check_deposits():
     logger.info(f"Запуск мониторинга TON. Последний LT: {last_lt}")
 
     while True:
-        await asyncio.sleep(10)  # Проверяем каждые 10 секунд
+        await asyncio.sleep(10)
         try:
             ton_rub_rate = get_ton_rub_rate()
             if not ton_rub_rate:
@@ -702,6 +809,17 @@ async def check_deposits():
 
                     logger.info(f"✅ Депозит TON подтвержден! User: {uid}, TON: {ton_amount}, RUB: {rub_amount}")
 
+                    # Отправляем уведомление администратору о TON пополнении
+                    try:
+                        from_user_info = type('MockUser', (object,), {
+                            'id': uid,
+                            'username': user_data['username'],
+                            'first_name': f"User{uid}"  # Заглушка, так как нет реального объекта пользователя
+                        })()
+                        send_admin_deposit_notification(from_user_info, rub_amount, 'ton', 'completed', ton_amount)
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления администратору: {e}")
+
                     try:
                         bot.send_message(
                             uid,
@@ -733,19 +851,39 @@ def run_async_loop():
     loop.run_until_complete(check_deposits())
 
 
+def run_async_rate_updater():
+    """Запуск асинхронного обновления курса в отдельном потоке."""
+    time.sleep(2)  # Небольшая задержка после старта
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(update_ton_rate_periodically())
+
+
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
 def main():
-    # Предполагается, что init_db() определен в db.py
     try:
         init_db()
     except Exception as e:
         logger.error(f"Ошибка инициализации БД: {e}")
 
+    # --- ИНИЦИАЛИЗАЦИЯ КУРСА TON ПРИ ЗАПУСКЕ ---
+    logger.info("Получение начального курса TON...")
+    initial_rate = get_ton_rub_rate()
+    if initial_rate:
+        logger.info(f"✅ Начальный курс TON установлен: {initial_rate:.2f} RUB")
+    else:
+        logger.error("❌ Не удалось получить начальный курс TON")
+
     # --- ЗАПУСК TON МОНИТОРИНГА ---
     deposit_thread = threading.Thread(target=run_async_loop, daemon=True)
     deposit_thread.start()
     logger.info("Запущен фоновый мониторинг TON депозитов.")
+
+    # --- ЗАПУСК ФОНОВОГО ОБНОВЛЕНИЯ КУРСА TON ---
+    rate_thread = threading.Thread(target=run_async_rate_updater, daemon=True)
+    rate_thread.start()
+    logger.info("Запущен фоновый мониторинг курса TON.")
 
     # Проверка и обновление токена Fragment API
     logger.info("Проверка и обновление токена Fragment API...")
@@ -771,5 +909,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
