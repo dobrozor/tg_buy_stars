@@ -12,11 +12,13 @@ from datetime import datetime
 from dotenv import load_dotenv
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
+from excel_export import export_database_to_excel, cleanup_old_exports
+import os
 
 
 try:
     from config import STAR_PRICE, MAIN_MENU_IMAGE, WELCOME_MES, logger, REFERRAL_REWARD, \
-    ADMIN_ID  # ДОБАВЛЕН REFERRAL_REWARD
+    ADMIN_ID, DB_NAME
     from db import (
         init_db, get_user, create_user, update_balance, add_transaction,
         get_pending_payment, update_payment_status,
@@ -132,6 +134,126 @@ def start_or_menu(message: Message):
         reply_markup=main_menu_keyboard()
     )
 
+@bot.message_handler(commands=['export'])
+def handle_export_command(message: Message):
+    """Обработчик команды /export для экспорта БД в Excel."""
+    user_id = message.from_user.id
+
+    # Проверяем, что команду вызвал админ
+    if str(user_id) != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав для выполнения этой команды.")
+        return
+
+    try:
+        # Отправляем сообщение о начале процесса
+        processing_msg = bot.reply_to(message, "🔄 Начинаю экспорт базы данных в Excel...")
+
+        # Выполняем экспорт
+        filename = export_database_to_excel()
+
+        if filename and os.path.exists(filename):
+            # Отправляем файл
+            with open(filename, 'rb') as file:
+                bot.send_document(
+                    chat_id=message.chat.id,
+                    document=file,
+                    caption=f"📊 Экспорт базы данных завершен\nФайл: {filename}",
+                    reply_to_message_id=message.message_id
+                )
+
+            # УДАЛЯЕМ файл после успешной отправки
+            try:
+                os.remove(filename)
+                logger.info(f"✅ Файл экспорта удален: {filename}")
+            except Exception as delete_error:
+                logger.error(f"❌ Ошибка удаления файла {filename}: {delete_error}")
+
+            # Удаляем сообщение о процессе
+            bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
+
+        else:
+            bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=processing_msg.message_id,
+                text="❌ Не удалось создать файл экспорта."
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении команды /export: {e}")
+
+        # Пытаемся удалить файл даже в случае ошибки отправки
+        try:
+            if 'filename' in locals() and filename and os.path.exists(filename):
+                os.remove(filename)
+                logger.info(f"✅ Файл экспорта удален после ошибки: {filename}")
+        except Exception as delete_error:
+            logger.error(f"❌ Ошибка удаления файла после ошибки отправки: {delete_error}")
+
+        bot.reply_to(message, f"❌ Произошла ошибка при экспорте: {e}")
+
+
+@bot.message_handler(commands=['stats'])
+def handle_stats_command(message: Message):
+    """Обработчик команды /stats для быстрой статистики."""
+    user_id = message.from_user.id
+
+    # Проверяем, что команду вызвал админ
+    if str(user_id) != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав для выполнения этой команды.")
+        return
+
+    try:
+        from db import get_setting
+        import sqlite3
+
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+
+        # Быстрая статистика
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM users WHERE referrer_id IS NOT NULL")
+        users_with_referrer = cursor.fetchone()[0]
+
+        cursor.execute("SELECT SUM(balance) FROM users")
+        total_balance = cursor.fetchone()[0] or 0
+
+        cursor.execute("SELECT COUNT(*) FROM transactions WHERE type = 'stars_purchase' AND status = 'completed'")
+        stars_transactions = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM payments WHERE status = 'succeeded'")
+        successful_payments = cursor.fetchone()[0]
+
+        cursor.execute("SELECT SUM(amount) FROM payments WHERE status = 'succeeded'")
+        total_payments = cursor.fetchone()[0] or 0
+
+        ton_rate = get_setting('ton_rub_rate', 'N/A')
+        last_rate_update = get_setting('ton_rate_updated_at', 'N/A')
+
+        conn.close()
+
+        stats_message = (
+            "📊 *Статистика бота*\n\n"
+            f"👥 *Пользователи:*\n"
+            f"• Всего: {total_users}\n"
+            f"• С реферерами: {users_with_referrer}\n"
+            f"• Общий баланс: {total_balance:.2f} руб\n\n"
+            f"💫 *Звезды:*\n"
+            f"• Покупок звезд: {stars_transactions}\n\n"
+            f"💳 *Платежи:*\n"
+            f"• Успешных: {successful_payments}\n"
+            f"• Общая сумма: {total_payments:.2f} руб\n\n"
+            f"🪙 *Курс TON:*\n"
+            f"• Текущий: {ton_rate} RUB\n"
+            f"• Обновлен: {last_rate_update[:16] if last_rate_update != 'N/A' else 'N/A'}"
+        )
+
+        bot.reply_to(message, stats_message, parse_mode='Markdown')
+
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении команды /stats: {e}")
+        bot.reply_to(message, f"❌ Ошибка получения статистики: {e}")
 
 # --- Обработчики колбэков (Меню и Профиль) ---
 @bot.callback_query_handler(func=lambda call: call.data == 'buy_stars')
@@ -862,10 +984,16 @@ def run_async_rate_updater():
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
 def main():
-    try:
-        init_db()
-    except Exception as e:
-        logger.error(f"Ошибка инициализации БД: {e}")
+    def main():
+        try:
+            init_db()
+        except Exception as e:
+            logger.error(f"Ошибка инициализации БД: {e}")
+
+        try:
+            cleanup_old_exports(max_files=3)  # Оставляем только 3 последних файла
+        except Exception as e:
+            logger.error(f"Ошибка очистки старых файлов экспорта: {e}")
 
     # --- ИНИЦИАЛИЗАЦИЯ КУРСА TON ПРИ ЗАПУСКЕ ---
     logger.info("Получение начального курса TON...")
