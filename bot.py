@@ -312,10 +312,12 @@ def process_friend_username(message: Message):
 
     user_data = get_user(user_id)
 
+    escaped_username = username_input.replace('_', r'\_').replace('*', r'\*').replace('`', r'\`')
+
     bot.edit_message_caption(
         chat_id=message.chat.id,
         message_id=target_message_id,
-        caption=f"Вы будете покупать звёзды для пользователя **@{username_input}**. Выберите количество:",
+        caption=f"Вы будете покупать звёзды для пользователя **@{escaped_username}**. Выберите количество:",
         reply_markup=buy_stars_quantity_keyboard(user_data),
         parse_mode='Markdown'
     )
@@ -769,4 +771,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
