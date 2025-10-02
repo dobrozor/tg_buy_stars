@@ -10,18 +10,23 @@
     YOOKASSA_SHOP_ID=АЙДИ_МАГАЗИНА_ЮКАССА
     YOOKASSA_SECRET_KEY=КЛЮЧ_МАГАЗИНА_ЮКАССА
     ADMIN_ID=АЙДИ_АДМИНА_ТГ
+
+    TON_DEPOSIT_ADDRESS=АДРЕС_ВАШЕГО_КОШЕЛЬКА_ТОН
+    TON_API_KEY=АПИ_КЛЮЧ_ТОН
     
     FRAGMENT_API_KEY=ФРАГМЕНТ_КЛЮЧ_АПИ
     FRAGMENT_PHONE=ТЕЛЕФОН_К_КОТОРОМУ_ПРИВЯЗАН_ТГ
     FRAGMENT_MNEMONICS="слова которые даются телеграмм кошельком"
 
 Все данные для фрагмент апи беерм отсюда: https://fragment-api.com/dashboard
+А сам TON_API_KEY в телеграмм у бота https://t.me/tonapibot
 Данные для кассы берем отсюда **ВАЖНО!!!** 
 у вас должен быть магазин на юкассе: https://yookassa.ru/my/payments
 
-## Настйрока в коде
+## Настйрока в коде bot.py
     STAR_PRICE = 1.5  # 1.5 рубля за звезду
     MAIN_MENU_IMAGE = "https://sociogramm.ru/assets/uploads/blogs/blog/kak-poluchit-zvezdy-v-telegram-1.jpeg"  # URL изображения для главного меню
+    REFERRAL_REWARD = 5.0 # Сколько получит юзер за 1 приглашенного друга на баланс
 
 Здесь вы сможете поставить свою фотку (просто чтоб было красиво) и указать цену за звезды. Цена не плавающая, так что указывайте со своей наценкой, мне кажется лучшая цена 1.5 - 1.7 рубля
 
