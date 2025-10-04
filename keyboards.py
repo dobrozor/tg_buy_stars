@@ -1,8 +1,8 @@
 # keyboards.py
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-# from config import STAR_PRICE # УДАЛЕНО
-from db import get_setting  # ИМПОРТИРУЕМ для получения цены
+from config import STAR_PRICE
+from db import get_setting 
 
 
 def main_menu_keyboard():
@@ -66,3 +66,4 @@ def back_to_main_keyboard():
     keyboard.row(InlineKeyboardButton("↩️ Назад", callback_data='main_menu'))
 
     return keyboard
+
