@@ -981,21 +981,17 @@ def run_async_rate_updater():
     loop.run_until_complete(update_ton_rate_periodically())
 
 
-# --- ГЛАВНАЯ ФУНКЦИЯ ---
-
 def main():
-    def main():
-        try:
-            init_db()
-        except Exception as e:
-            logger.error(f"Ошибка инициализации БД: {e}")
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"Ошибка инициализации БД: {e}")
 
-        try:
-            cleanup_old_exports(max_files=3)  # Оставляем только 3 последних файла
-        except Exception as e:
-            logger.error(f"Ошибка очистки старых файлов экспорта: {e}")
+    try:
+        cleanup_old_exports(max_files=1)
+    except Exception as e:
+        logger.error(f"Ошибка очистки старых файлов экспорта: {e}")
 
-    # --- ИНИЦИАЛИЗАЦИЯ КУРСА TON ПРИ ЗАПУСКЕ ---
     logger.info("Получение начального курса TON...")
     initial_rate = get_ton_rub_rate()
     if initial_rate:
@@ -1003,12 +999,10 @@ def main():
     else:
         logger.error("❌ Не удалось получить начальный курс TON")
 
-    # --- ЗАПУСК TON МОНИТОРИНГА ---
     deposit_thread = threading.Thread(target=run_async_loop, daemon=True)
     deposit_thread.start()
     logger.info("Запущен фоновый мониторинг TON депозитов.")
 
-    # --- ЗАПУСК ФОНОВОГО ОБНОВЛЕНИЯ КУРСА TON ---
     rate_thread = threading.Thread(target=run_async_rate_updater, daemon=True)
     rate_thread.start()
     logger.info("Запущен фоновый мониторинг курса TON.")
@@ -1037,4 +1031,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
