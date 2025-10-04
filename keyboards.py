@@ -32,7 +32,7 @@ def buy_stars_quantity_keyboard(user_data):
     keyboard = InlineKeyboardMarkup()
 
     # Получаем актуальную цену из БД
-    star_price = float(get_setting('final_star_price_rub', 1.5))  # 1.5 - цена по умолчанию, если в БД пусто
+    star_price = config.STAR_PRICE
 
     options = [
         (50, f"50 звезд - {star_price * 50:.2f} руб"),
@@ -64,4 +64,5 @@ def deposit_keyboard(user_data):
 def back_to_main_keyboard():
     keyboard = InlineKeyboardMarkup()
     keyboard.row(InlineKeyboardButton("↩️ Назад", callback_data='main_menu'))
+
     return keyboard
