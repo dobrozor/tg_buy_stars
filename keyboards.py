@@ -1,8 +1,10 @@
 # keyboards.py
 
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import STAR_PRICE
-from db import get_setting 
+from telebot.types import *
+
+import config
+from config import *
+from db import *
 
 
 def main_menu_keyboard():

@@ -58,7 +58,27 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 animation_running = False
 
-
+# Добавьте эту функцию после импортов и перед обработчиками
+def safe_edit_message_caption(bot, chat_id, message_id, new_caption, new_reply_markup=None, parse_mode=None):
+    """Безопасно редактирует caption сообщения, проверяя изменения."""
+    try:
+        bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=new_caption,
+            reply_markup=new_reply_markup,
+            parse_mode=parse_mode
+        )
+        return True
+    except Exception as e:
+        if "message is not modified" in str(e):
+            # Игнорируем эту ошибку - сообщение уже имеет нужный контент
+            logger.debug("Сообщение не требует изменений")
+            return True
+        else:
+            # Пробрасываем другие ошибки
+            logger.error(f"Ошибка редактирования сообщения: {e}")
+            raise e
 # --- Анимация загрузки ---
 def animate_caption(bot, call):
     global animation_running
@@ -691,34 +711,34 @@ def process_custom_deposit_amount(message: Message):
 
 
 def process_deposit(call, amount: float, deposit_type='yookassa'):
-    # 'call' может быть как CallbackQuery, так и MockCall
     bot_username = bot.get_me().username
     payment_url = create_yookassa_payment(amount, call.from_user.id, bot_username)
 
     if payment_url:
-
         keyboard = InlineKeyboardMarkup()
         keyboard.row(InlineKeyboardButton("✅ Я оплатил", callback_data='check_payment'))
 
-        bot.edit_message_caption(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            caption=f"💳 Для пополнения на **{amount:.2f} руб**:\n\n"
-                    f"1. Перейдите по ссылке: {payment_url}\n"
-                    f"2. Оплатите счет\n"
-                    f"3. Нажмите кнопку '✅ Я оплатил'\n\n"
-                    "⚠️ Платеж обрабатывается автоматически в течение нескольких минут.",
-            reply_markup=keyboard,
+        safe_edit_message_caption(
+            bot,
+            call.message.chat.id,
+            call.message.message_id,
+            f"💳 Для пополнения на **{amount:.2f} руб**:\n\n"
+            f"1. Перейдите по ссылке: {payment_url}\n"
+            f"2. Оплатите счет\n"
+            f"3. Нажмите кнопку '✅ Я оплатил'\n\n"
+            "⚠️ Платеж обрабатывается автоматически в течение нескольких минут.",
+            keyboard,
             parse_mode='Markdown'
         )
     else:
+        # Просто уведомляем пользователя об ошибке без изменения сообщения
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка создания платежа! Попробуйте позже.", show_alert=True)
-        except Exception:
-            logger.error("Не удалось ответить на MockCall, но продолжаем...")
+            if hasattr(call, 'id'):
+                bot.answer_callback_query(call.id, "❌ Ошибка создания платежа! Попробуйте позже.", show_alert=True)
+        except Exception as e:
+            logger.error(f"Ошибка при ответе на callback: {e}")
 
-        # Возврат в меню депозита
-        deposit_menu(call)
+        # НЕ возвращаемся в deposit_menu, чтобы избежать конфликта изменений
 
 
 
